@@ -353,6 +353,11 @@ struct Router1
 
         ctx->sorted_shuffle(net_names);
 
+        if (ctx->debug) {
+            log("    Destination wire: %s\n", ctx->getWireName(dst_wire).c_str(ctx));
+            log("    Path delay estimate: %.2f\n", ctx->getDelayNS(ctx->estimateDelay(src_wire, dst_wire)));
+        }
+
         for (IdString net_name : net_names) {
             NetInfo *net_info = ctx->nets.at(net_name).get();
 
