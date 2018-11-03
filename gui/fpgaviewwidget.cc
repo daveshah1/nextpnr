@@ -650,6 +650,7 @@ void FPGAViewWidget::mousePressEvent(QMouseEvent *event)
     bool btn_mid = event->buttons() & Qt::MidButton;
     bool btn_left = event->buttons() & Qt::LeftButton;
 
+
     if (btn_right || btn_mid || (btn_left && shift)) {
         lastDragPos_ = event->pos();
     }
@@ -877,7 +878,6 @@ void FPGAViewWidget::leaveEvent(QEvent *event)
 void FPGAViewWidget::update_vbos()
 {
     lineShader_.update_vbos(GraphicElement::STYLE_GRID, rendererData_->gfxGrid);
-
     for (int style = GraphicElement::STYLE_FRAME; style < GraphicElement::STYLE_HIGHLIGHTED0; style++) {
         lineShader_.update_vbos((enum GraphicElement::style_t)(style), rendererData_->gfxByStyle[style]);
     }
