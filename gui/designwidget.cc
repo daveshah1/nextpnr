@@ -318,6 +318,12 @@ void DesignWidget::newContext(Context *ctx)
                 wireMap[std::pair<int, int>(wire.location.x, wire.location.y)].push_back(wire);
             }
 #endif
+#ifdef ARCH_XC7
+            for (const auto &wire : ctx->getWires()) {
+                const auto loc = torc_info->wire_to_loc(wire.index);
+                wireMap[std::pair<int, int>(loc.x, loc.y)].push_back(wire);
+            }
+#endif
             auto wireGetter = [](Context *ctx, WireId id) { return ctx->getWireName(id); };
             getTreeByElementType(ElementType::WIRE)
                     ->loadData(ctx,
