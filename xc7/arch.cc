@@ -79,11 +79,10 @@ TorcInfo::TorcInfo(BaseCtx *ctx, const std::string &inDeviceName, const std::str
             bel_to_site_index.push_back(i);
             bel_to_site_index.push_back(i);
             site_index_to_type[i] = id_SLICE_LUT6;
-            const auto site_name = site.getName();            
+            const auto site_name = site.getName();
             if (!boost::regex_match(site_name.c_str(), what, re_loc))
                 throw;
             const auto sx = boost::lexical_cast<int>(what.str(1));
-            const auto site_name_back = site_name.back();
             if ((sx & 1) == 0) {
                 bel_to_loc.emplace_back(x, y, 0);
                 bel_to_loc.emplace_back(x, y, 1);
