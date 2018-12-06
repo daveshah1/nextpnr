@@ -500,7 +500,8 @@ struct ArchArgs
     enum ArchArgsTypes
     {
         NONE,
-        Z020
+        Z020,
+        VX980
     } type = NONE;
     std::string package;
 };
