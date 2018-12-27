@@ -21,8 +21,6 @@
 #error Include "arch.h" via "nextpnr.h" only.
 #endif
 
-#include <boost/serialization/access.hpp>
-
 #include "torc/Architecture.hpp"
 #include "torc/Common.hpp"
 using namespace torc::architecture;
@@ -338,29 +336,6 @@ struct TorcInfo
     std::vector<std::pair<int,int>> tile_to_xy;
 
     TorcInfo(const std::string &inDeviceName, const std::string &inPackageName);
-private:
-    friend class boost::serialization::access;
-    //TorcInfo(const std::string &inDeviceName, const std::string &inPackageName);
-    //template<class Archive, class T> friend inline void load_construct_data(Archive &ar, T *t, const unsigned int file_version);
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int /*version*/)
-    {
-        ar & bel_to_site_index;
-        ar & num_bels;
-        ar & site_index_to_bel;
-        ar & site_index_to_type;
-        ar & bel_to_loc;
-        ar & segment_to_wire;
-        ar & trivial_to_wire;
-        ar & wire_to_tilewire;
-        ar & num_wires;
-        ar & wire_to_delay;
-        ar & wire_to_pips_downhill;
-        ar & pip_to_arc;
-        ar & num_pips;
-        ar & wire_is_global;
-        ar & tile_to_xy;
-    }
 };
 extern std::unique_ptr<const TorcInfo> torc_info;
 
@@ -686,7 +661,6 @@ struct Arch : BaseCtx
         auto pip = it->second.pip;
         if (pip != PipId()) {
             pip_to_net[pip.index] = nullptr;
-            // switches_locked[chip_info->pip_data[pip.index].switch_index] = nullptr;
         }
 
         net_wires.erase(it);
@@ -742,10 +716,8 @@ struct Arch : BaseCtx
     {
         NPNR_ASSERT(pip != PipId());
         NPNR_ASSERT(pip_to_net[pip.index] == nullptr);
-        // NPNR_ASSERT(switches_locked[chip_info->pip_data[pip.index].switch_index] == nullptr);
 
         pip_to_net[pip.index] = net;
-        // switches_locked[chip_info->pip_data[pip.index].switch_index] = net;
 
         WireId dst = getPipDstWire(pip);
         NPNR_ASSERT(wire_to_net[dst.index] == nullptr);
@@ -760,7 +732,6 @@ struct Arch : BaseCtx
     {
         NPNR_ASSERT(pip != PipId());
         NPNR_ASSERT(pip_to_net[pip.index] != nullptr);
-        // NPNR_ASSERT(switches_locked[chip_info->pip_data[pip.index].switch_index] != nullptr);
 
         WireId dst = getPipDstWire(pip);
         NPNR_ASSERT(wire_to_net[dst.index] != nullptr);
@@ -768,7 +739,6 @@ struct Arch : BaseCtx
         pip_to_net[pip.index]->wires.erase(dst);
 
         pip_to_net[pip.index] = nullptr;
-        // switches_locked[chip_info->pip_data[pip.index].switch_index] = nullptr;
         refreshUiPip(pip);
         refreshUiWire(dst);
     }
@@ -776,25 +746,6 @@ struct Arch : BaseCtx
     bool checkPipAvail(PipId pip) const
     {
         NPNR_ASSERT(pip != PipId());
-        // auto &pi = chip_info->pip_data[pip.index];
-        // auto &si = chip_info->bits_info->switches[pi.switch_index];
-
-        // if (switches_locked[pi.switch_index] != nullptr)
-        //    return false;
-
-        // if (pi.flags & PipInfoPOD::FLAG_ROUTETHRU) {
-        //    NPNR_ASSERT(si.bel >= 0);
-        //    if (bel_to_cell[si.bel] != nullptr)
-        //        return false;
-        //}
-
-        // if (pi.flags & PipInfoPOD::FLAG_NOCARRY) {
-        //    NPNR_ASSERT(si.bel >= 0);
-        //    if (bel_carry[si.bel])
-        //        return false;
-        //}
-
-        // return true;
         return pip_to_net[pip.index] == nullptr;
     }
 
@@ -809,7 +760,6 @@ struct Arch : BaseCtx
     NetInfo *getConflictingPipNet(PipId pip) const
     {
         NPNR_ASSERT(pip != PipId());
-        // return switches_locked[chip_info->pip_data[pip.index].switch_index];
         return pip_to_net[pip.index];
     }
 
@@ -823,16 +773,9 @@ struct Arch : BaseCtx
 
     Loc getPipLocation(PipId pip) const
     {
-        //const auto &arc = torc_info->pip_to_arc[pip.index];
-        //const auto &tw = arc.getSourceTilewire();
-        //const auto &tile_info = torc_info->tiles.getTileInfo(tw.getTileIndex());
-
-        //Loc loc;
-        //loc.x = tile_info.getCol();
-        //loc.y = tile_info.getRow();
-        //loc.z = 0;
-        //return loc;
-        throw;
+        Loc loc;
+        NPNR_ASSERT("TODO");
+        return loc;
     }
 
     IdString getPipName(PipId pip) const;
@@ -990,7 +933,5 @@ struct Arch : BaseCtx
 
     float placer_constraintWeight = 10;
 };
-
-// void ice40DelayFuzzerMain(Context *ctx);
 
 NEXTPNR_NAMESPACE_END
