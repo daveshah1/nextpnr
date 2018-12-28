@@ -1,3 +1,6 @@
 [submodule "tests"]
 	path = tests
 	url = https://github.com/YosysHQ/nextpnr-tests
+[submodule "torc"]
+	path = torc
+	url = https://github.com/eddiehung/torc
