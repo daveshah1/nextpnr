@@ -517,10 +517,8 @@ class ParallelRefinementPlacer
         delta = lambda * (moveChange.timing_delta / std::max<double>(last_timing_cost, epsilon)) +
                 (1 - lambda) * (double(moveChange.wirelen_delta) / std::max<double>(last_wirelen_cost, epsilon));
         delta += (cfg.constraintWeight / temp) * (new_dist - old_dist) / last_wirelen_cost;
-        n_move++;
         // SA acceptance criterea
         if (delta < 0 || (temp > 1e-8 && (ctx->rng() / float(0x3fffffff)) <= std::exp(-delta / temp))) {
-            n_accept++;
         } else {
             if (other_cell != nullptr)
                 ctx->unbindBel(oldBel);
@@ -704,11 +702,11 @@ class ParallelRefinementPlacer
     }
 
     // Get the bounding box for a net
-    inline BoundingBox get_net_bounds(NetInfo *net)
+    inline BoundingBox get_net_bounds(NetInfo *net, const std::unordered_map<IdString, BelId> &movedCells = {})
     {
         BoundingBox bb;
         NPNR_ASSERT(net->driver.cell != nullptr);
-        Loc dloc = ctx->getBelLocation(net->driver.cell->bel);
+        Loc dloc = ctx->getBelLocation(cell_bel(net->driver.cell, movedCells));
         bb.x0 = dloc.x;
         bb.x1 = dloc.x;
         bb.y0 = dloc.y;
@@ -717,7 +715,7 @@ class ParallelRefinementPlacer
         for (auto user : net->users) {
             if (user.cell->bel == BelId())
                 continue;
-            Loc uloc = ctx->getBelLocation(user.cell->bel);
+            Loc uloc = ctx->getBelLocation(cell_bel(user.cell, movedCells));
             bb.x0 = std::min(bb.x0, uloc.x);
             bb.x1 = std::max(bb.x1, uloc.x);
             bb.y0 = std::min(bb.y0, uloc.y);
@@ -728,7 +726,7 @@ class ParallelRefinementPlacer
     }
 
     // Get the timing cost for an arc of a net
-    inline double get_timing_cost(NetInfo *net, size_t user)
+    inline double get_timing_cost(NetInfo *net, size_t user, const std::unordered_map<IdString, BelId> &movedCells = {})
     {
         int cc;
         if (net->driver.cell == nullptr)
@@ -742,7 +740,14 @@ class ParallelRefinementPlacer
             auto crit = net_crit.find(net->name);
             if (crit == net_crit.end() || crit->second.criticality.empty())
                 return 0;
-            double delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
+            double delay;
+            if (movedCells.count(net->driver.cell->name) || movedCells.count(net->users.at(user).cell->name)) {
+                // Have to use estimateDelay here
+                BelId src = cell_bel(net->driver.cell, movedCells), dest = cell_bel(net->users.at(user).cell, movedCells);
+                delay = ctx->getDelayNS(ctx->estimateDelay(ctx->getBelPinWire(src, net->driver.port), ctx->getBelPinWire(dest, net->users.at(user).port)));
+            } else {
+               delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
+            }
             return delay * std::pow(crit->second.criticality.at(user), crit_exp);
         }
     }
@@ -813,9 +818,16 @@ class ParallelRefinementPlacer
 
     } moveChange;
 
-    void add_move_cell(MoveChangeData &mc, CellInfo *cell, BelId old_bel)
+    BelId cell_bel(CellInfo *cell, const std::unordered_map<IdString, BelId> &movedCells) {
+        auto mc = movedCells.find(cell->name);
+        if (mc != movedCells.end())
+            return mc->second;
+        return cell->bel;
+    }
+
+    void add_move_cell(MoveChangeData &mc, CellInfo *cell, BelId old_bel, const std::unordered_map<IdString, BelId> &movedCells = {})
     {
-        Loc curr_loc = ctx->getBelLocation(cell->bel);
+        Loc curr_loc = ctx->getBelLocation(cell_bel(cell, movedCells));
         Loc old_loc = ctx->getBelLocation(old_bel);
         // Check net bounds
         for (const auto &port : cell->ports) {
@@ -854,11 +866,11 @@ class ParallelRefinementPlacer
         }
     }
 
-    void compute_cost_changes(MoveChangeData &md)
+    void compute_cost_changes(MoveChangeData &md, const std::unordered_map<IdString, BelId> &movedCells = {})
     {
         for (const auto &bc : md.bounds_changed_nets) {
             wirelen_t old_hpwl = net_bounds.at(bc).hpwl();
-            auto bounds = get_net_bounds(net_by_udata.at(bc));
+            auto bounds = get_net_bounds(net_by_udata.at(bc), movedCells);
             md.new_net_bounds.emplace_back(std::make_pair(bc, bounds));
             md.wirelen_delta += (bounds.hpwl() - old_hpwl);
             md.already_bounds_changed[bc] = false;
@@ -866,7 +878,7 @@ class ParallelRefinementPlacer
         if (ctx->timing_driven) {
             for (const auto &tc : md.changed_arcs) {
                 double old_cost = net_arc_tcost.at(tc.first).at(tc.second);
-                double new_cost = get_timing_cost(net_by_udata.at(tc.first), tc.second);
+                double new_cost = get_timing_cost(net_by_udata.at(tc.first), tc.second, movedCells);
                 md.new_arc_costs.emplace_back(std::make_pair(tc, new_cost));
                 md.timing_delta += (new_cost - old_cost);
                 md.already_changed_arcs[tc.first][tc.second] = false;
@@ -874,7 +886,7 @@ class ParallelRefinementPlacer
         }
     }
 
-    void commit_cost_changes(MoveChangeData &md)
+    void commit_cost_changes(MoveChangeData &md, const std::unordered_map<IdString, BelId> &movedCells = {})
     {
         for (const auto &bc : md.new_net_bounds)
             net_bounds[bc.first] = bc.second;
@@ -908,6 +920,7 @@ class ParallelRefinementPlacer
         std::mutex m;
         std::condition_variable cv;
         bool ready = false, processed = false, die = false;
+        int moves = 0, accepted = 0;
     };
 
     std::vector<MoveEvaluatorData*> threadpool;
@@ -921,6 +934,8 @@ class ParallelRefinementPlacer
             if (d.die)
                 return;
             d.ready = false;
+            d.moves = 0;
+            d.accepted = 0;
             for (auto &cell : d.evalCells) {
                 CellInfo *ci = cell.first;
 
@@ -963,7 +978,7 @@ class ParallelRefinementPlacer
                 };
 
                 // Number of bels to explore
-                int M = 5;
+                int M = 1;
                 BelId best_bel;
                 double best_cost_delta = std::numeric_limits<double>::max();
                 for (int i = 0; i < M; i++) {
@@ -976,34 +991,32 @@ class ParallelRefinementPlacer
                         if (bound->belStrength >= STRENGTH_STRONG || is_constrained(bound))
                             continue;
                     }
-                    ci->bel = try_bel;
-                    add_move_cell(d.moveChange, ci, old_bel);
+                    d.movedCells[ci->name] = try_bel;
+                    add_move_cell(d.moveChange, ci, old_bel, d.movedCells);
                     if (bound != nullptr) {
-                        bound->bel = old_bel;
-                        add_move_cell(d.moveChange, bound, try_bel);
+                        d.movedCells[bound->name] = old_bel;
+                        add_move_cell(d.moveChange, bound, try_bel, d.movedCells);
                     }
-                    compute_cost_changes(d.moveChange);
-                    double cost_delta = lambda * (d.moveChange.timing_delta / last_timing_cost) + (1 - lambda) * (double(d.moveChange.wirelen_delta) / double(last_wirelen_cost));
+                    compute_cost_changes(d.moveChange, d.movedCells);
+                    double cost_delta = lambda * (d.moveChange.timing_delta / last_timing_cost) +
+                                        (1 - lambda) * (double(d.moveChange.wirelen_delta) / double(last_wirelen_cost));
                     if (cost_delta < best_cost_delta) {
                         best_cost_delta = cost_delta;
                         best_bel = try_bel;
                     }
-
-                    ci->bel = old_bel;
-                    if (bound != nullptr)
-                        bound->bel = try_bel;
-                    NPNR_ASSERT(ci->bel != BelId());
-                    if (bound != nullptr)
-                        NPNR_ASSERT(bound->bel != BelId());
-
                     d.movedCells.clear();
                     d.moveChange.reset();
                 }
-                NPNR_ASSERT(ci->bel != BelId());
 
-                if (best_bel != BelId())
-                    cell.second = best_bel;
-
+                if (best_bel != BelId()) {
+                    d.moves++;
+                    if (best_cost_delta < 0 || (temp > 1e-9 && (rng(0x3fffffff) / float(0x3fffffff)) <=
+                                                               std::exp(-best_cost_delta / temp))) {
+                        log_info("%f %d\n", best_cost_delta, rng(10));
+                        cell.second = best_bel;
+                        d.accepted++;
+                    }
+                }
             }
             d.processed = true;
             lk.unlock();
@@ -1031,7 +1044,8 @@ class ParallelRefinementPlacer
     void run_threadpool() {
         // Split all the cells up into batches N cells, which are then split evenly between threads
         // This is a balance between QoR, and overhead dispatching work to threads
-        const size_t N = 192;
+        const size_t N = 32;
+        ctx->shuffle(autoplaced);
         for (size_t i = 0; i < autoplaced.size(); i += N) {
             uint64_t seed = ctx->rng64();
             size_t lb = i, ub = std::min(i + N, autoplaced.size());
@@ -1061,14 +1075,15 @@ class ParallelRefinementPlacer
                 lk.unlock();
             }
             // Apply proposed changes from workers for real
-            for (auto &p : threadpool)
+            for (auto &p : threadpool) {
+                n_accept += p->accepted;
+                n_move += p->moves;
                 for (auto &ec : p->evalCells) {
                     if (ec.second != BelId() && ec.second != ec.first->bel) {
-                        log_info("%s [%s] -> %s\n", ec.first->name.c_str(ctx), ctx->getBelName(ec.first->bel).c_str(ctx), ctx->getBelName(ec.second).c_str(ctx));
                         try_swap_position(ec.first, ec.second);
                     }
                 }
-
+            }
         }
     }
 
