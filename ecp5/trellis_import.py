@@ -119,9 +119,20 @@ def process_pio_db(ddrg, device):
                 pinfunc = metaitem["function"]
             else:
                 pinfunc = None
+            dqs = -1
+            if "dqs" in metaitem:
+                tdqs = metaitem["dqs"]
+                if tdqs[0] == "L":
+                    dqs = 0
+                elif tdqs[0] == "R":
+                    dqs = 2048
+                suffix_size = 0
+                while tdqs[-(suffix_size+1)].isdigit():
+                    suffix_size += 1
+                dqs |= int(tdqs[-suffix_size:])
             bel_idx = get_bel_index(ddrg, loc, pio)
             if bel_idx is not None:
-                pindata.append((loc, bel_idx, bank, pinfunc))
+                pindata.append((loc, bel_idx, bank, pinfunc, dqs))
 
 global_data = {}
 quadrants = ["UL", "UR", "LL", "LR"]
@@ -142,7 +153,7 @@ speed_grade_names = ["6", "7", "8", "8_5G"]
 speed_grade_cells = {}
 speed_grade_pips = {}
 
-pip_class_to_idx = {"default": 0}
+pip_class_to_idx = {"default": 0, "zero": 1}
 
 timing_port_xform = {
     "RAD0": "D0",
@@ -188,7 +199,7 @@ def process_timing_data():
         pip_class_delays = []
         for i in range(len(pip_class_to_idx)):
             pip_class_delays.append((50, 50, 0, 0))
-
+        pip_class_delays[pip_class_to_idx["zero"]] = (0, 0, 0, 0)
         with open(timing_dbs.interconnect_db_path("ECP5", grade)) as f:
             interconn_data = json.load(f)
         for pipclass, pipdata in sorted(interconn_data.items()):
@@ -208,6 +219,12 @@ def process_timing_data():
 
 
 def get_pip_class(wire_from, wire_to):
+
+    if "FCO" in wire_from or "FCI" in wire_to:
+        return pip_class_to_idx["zero"]
+    if "F5" in wire_from or "FX" in wire_from or "FXA" in wire_to or "FXB" in wire_to:
+        return pip_class_to_idx["zero"]
+
     class_name = pip_classes.get_pip_class(wire_from, wire_to)
     if class_name is None or class_name not in pip_class_to_idx:
         class_name = "default"
@@ -360,7 +377,7 @@ def write_database(dev_name, chip, ddrg, endianness):
 
     bba.l("pio_info", "PIOInfoPOD")
     for pin in pindata:
-        loc, bel_idx, bank, func = pin
+        loc, bel_idx, bank, func, dqs = pin
         write_loc(loc, "abs_loc")
         bba.u32(bel_idx, "bel_index")
         if func is not None:
@@ -368,7 +385,7 @@ def write_database(dev_name, chip, ddrg, endianness):
         else:
             bba.r(None, "function_name")
         bba.u16(bank, "bank")
-        bba.u16(0, "padding")
+        bba.u16(dqs, "dqsgroup")
 
     bba.l("tiletype_names", "RelPtr<char>")
     for tt, idx in sorted(tiletype_names.items(), key=lambda x: x[1]):

@@ -29,9 +29,13 @@ struct Placer1Cfg : public Settings
     Placer1Cfg(Context *ctx);
     float constraintWeight;
     int minBelsForGridPick;
+    bool budgetBased;
+    float startTemp;
+    int timingFanoutThresh;
 };
 
 extern bool placer1(Context *ctx, Placer1Cfg cfg);
+extern bool placer1_refine(Context *ctx, Placer1Cfg cfg);
 
 NEXTPNR_NAMESPACE_END
 

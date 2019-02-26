@@ -244,15 +244,17 @@ NPNR_PACKED_STRUCT(struct ChipInfoPOD {
     RelPtr<RelPtr<char>> tile_wire_names;
 });
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(EXTERNAL_CHIPDB_ROOT)
 extern const char *chipdb_blob_384;
 extern const char *chipdb_blob_1k;
 extern const char *chipdb_blob_5k;
+extern const char *chipdb_blob_u4k;
 extern const char *chipdb_blob_8k;
 #else
 extern const char chipdb_blob_384[];
 extern const char chipdb_blob_1k[];
 extern const char chipdb_blob_5k[];
+extern const char chipdb_blob_u4k[];
 extern const char chipdb_blob_8k[];
 #endif
 
@@ -400,7 +402,8 @@ struct ArchArgs
         LP8K,
         HX1K,
         HX8K,
-        UP5K
+        UP5K,
+        U4K
     } type = NONE;
     std::string package;
 };
@@ -841,8 +844,11 @@ struct Arch : BaseCtx
     // -------------------------------------------------
 
     // Get the delay through a cell from one port to another, returning false
-    // if no path exists
+    // if no path exists. This only considers combinational delays, as required by the Arch API
     bool getCellDelay(const CellInfo *cell, IdString fromPort, IdString toPort, DelayInfo &delay) const;
+    // getCellDelayInternal is similar to the above, but without false path checks and including clock to out delays
+    // for internal arch use only
+    bool getCellDelayInternal(const CellInfo *cell, IdString fromPort, IdString toPort, DelayInfo &delay) const;
     // Get the port class, also setting clockInfoCount to the number of TimingClockingInfos associated with a port
     TimingPortClass getPortTimingClass(const CellInfo *cell, IdString port, int &clockInfoCount) const;
     // Get the TimingClockingInfo of a port

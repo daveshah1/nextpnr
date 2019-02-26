@@ -225,7 +225,7 @@ struct Timing
         }
 
         // Sanity check to ensure that all ports where fanins were recorded were indeed visited
-        if (!port_fanin.empty()) {
+        if (!port_fanin.empty() && !bool_or_default(ctx->settings, ctx->id("timing/ignoreLoops"), false)) {
             for (auto fanin : port_fanin) {
                 NetInfo *net = fanin.first->net;
                 if (net != nullptr) {
@@ -267,8 +267,7 @@ struct Timing
                     auto net_delay = net_delays ? ctx->getNetinfoRouteDelay(net, usr) : delay_t();
                     auto usr_arrival = net_arrival + net_delay;
 
-                    if (portClass == TMG_REGISTER_INPUT || portClass == TMG_ENDPOINT || portClass == TMG_IGNORE ||
-                        portClass == TMG_CLOCK_INPUT) {
+                    if (portClass == TMG_ENDPOINT || portClass == TMG_IGNORE || portClass == TMG_CLOCK_INPUT) {
                         // Skip
                     } else {
                         auto budget_override = ctx->getBudgetOverride(net, usr, net_delay);
@@ -612,8 +611,9 @@ struct Timing
                         continue;
                     delay_t dmax = crit_path->at(ClockPair{startdomain.first, startdomain.first}).path_delay;
                     for (size_t i = 0; i < net->users.size(); i++) {
-                        float criticality = 1.0f - (float(nc.slack.at(i) - worst_slack.at(startdomain.first)) / dmax);
-                        nc.criticality.at(i) = criticality;
+                        float criticality =
+                                1.0f - ((float(nc.slack.at(i)) - float(worst_slack.at(startdomain.first))) / dmax);
+                        nc.criticality.at(i) = std::min<double>(1.0, std::max<double>(0.0, criticality));
                     }
                     nc.max_path_length = nd.max_path_length;
                     nc.cd_worst_slack = worst_slack.at(startdomain.first);
@@ -838,6 +838,10 @@ void timing_analysis(Context *ctx, bool print_histogram, bool print_fmax, bool p
                     auto cursor = sink_wire;
                     delay_t delay;
                     while (driver_wire != cursor) {
+#ifdef ARCH_ECP5
+                        if (net->is_global)
+                            break;
+#endif
                         auto it = net->wires.find(cursor);
                         assert(it != net->wires.end());
                         auto pip = it->second.pip;
@@ -931,8 +935,7 @@ void timing_analysis(Context *ctx, bool print_histogram, bool print_fmax, bool p
         unsigned bar_width = 60;
         auto min_slack = slack_histogram.begin()->first;
         auto max_slack = slack_histogram.rbegin()->first;
-        auto bin_size = std::max(1u, (max_slack - min_slack) / num_bins);
-        num_bins = std::min((max_slack - min_slack) / bin_size, num_bins) + 1;
+        auto bin_size = std::max<unsigned>(1, ceil((max_slack - min_slack + 1) / float(num_bins)));
         std::vector<unsigned> bins(num_bins);
         unsigned max_freq = 0;
         for (const auto &i : slack_histogram) {

@@ -58,10 +58,15 @@ po::options_description ECP5CommandHandler::getArchOptions()
     specific.add_options()("um5g-45k", "set device type to LFE5UM5G-45F");
     specific.add_options()("um5g-85k", "set device type to LFE5UM5G-85F");
 
+    specific.add_options()("sa-placer", "use pure simulated annealing placer instead of HeAP analytic placer");
+
     specific.add_options()("package", po::value<std::string>(), "select device package (defaults to CABGA381)");
     specific.add_options()("speed", po::value<int>(), "select device speedgrade (6, 7 or 8)");
 
-    specific.add_options()("basecfg", po::value<std::string>(), "base chip configuration in Trellis text format");
+    specific.add_options()("basecfg", po::value<std::string>(),
+                           "base chip configuration in Trellis text format (deprecated)");
+    specific.add_options()("override-basecfg", po::value<std::string>(),
+                           "base chip configuration in Trellis text format");
     specific.add_options()("textcfg", po::value<std::string>(), "textual configuration in Trellis format to write");
 
     specific.add_options()("lpf", po::value<std::vector<std::string>>(), "LPF pin constraint file(s)");
@@ -77,8 +82,14 @@ void ECP5CommandHandler::validate()
 void ECP5CommandHandler::customBitstream(Context *ctx)
 {
     std::string basecfg;
-    if (vm.count("basecfg"))
+    if (vm.count("basecfg")) {
+        log_warning("--basecfg is deprecated.\nIf you are using a default baseconfig (from prjtrellis/misc/basecfgs), "
+                    "these are now embedded in nextpnr - please remove --basecfg.\nIf you are using a non-standard "
+                    "baseconfig in a special application, switch to using --override-basecfg.\n");
         basecfg = vm["basecfg"].as<std::string>();
+    } else if (vm.count("override-basecfg")) {
+        basecfg = vm["basecfg"].as<std::string>();
+    }
 
     std::string textcfg;
     if (vm.count("textcfg"))
@@ -138,8 +149,12 @@ std::unique_ptr<Context> ECP5CommandHandler::createContext()
             chipArgs.speed = ArchArgs::SPEED_6;
         }
     }
+    auto ctx = std::unique_ptr<Context>(new Context(chipArgs));
 
-    return std::unique_ptr<Context>(new Context(chipArgs));
+    if (vm.count("sa-placer"))
+        ctx->settings[ctx->id("sa_placer")] = "1";
+
+    return ctx;
 }
 
 void ECP5CommandHandler::customAfterLoad(Context *ctx)

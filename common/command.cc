@@ -77,6 +77,20 @@ bool CommandHandler::executeBeforeContext()
         return true;
     }
     validate();
+
+    if (vm.count("quiet")) {
+        log_streams.push_back(std::make_pair(&std::cerr, LogLevel::WARNING_MSG));
+    } else {
+        log_streams.push_back(std::make_pair(&std::cerr, LogLevel::LOG_MSG));
+    }
+
+    if (vm.count("log")) {
+        std::string logfilename = vm["log"].as<std::string>();
+        logfile = std::ofstream(logfilename);
+        if (!logfile)
+            log_error("Failed to open log file '%s' for writing.\n", logfilename.c_str());
+        log_streams.push_back(std::make_pair(&logfile, LogLevel::LOG_MSG));
+    }
     return false;
 }
 
@@ -108,7 +122,12 @@ po::options_description CommandHandler::getGeneralOptions()
     general.add_options()("randomize-seed,r", "randomize seed value for random number generator");
     general.add_options()("slack_redist_iter", po::value<int>(), "number of iterations between slack redistribution");
     general.add_options()("cstrweight", po::value<float>(), "placer weighting for relative constraint satisfaction");
+    general.add_options()("starttemp", po::value<float>(), "placer SA start temperature");
+    general.add_options()("placer-budgets", "use budget rather than criticality in placer timing weights");
+
     general.add_options()("pack-only", "pack design only without placement or routing");
+
+    general.add_options()("ignore-loops", "ignore combinational loops in timing analysis");
 
     general.add_options()("version,V", "show version");
     general.add_options()("test", "check architecture database integrity");
@@ -128,20 +147,6 @@ void CommandHandler::setupContext(Context *ctx)
     if (vm.count("debug")) {
         ctx->verbose = true;
         ctx->debug = true;
-    }
-
-    if (vm.count("quiet")) {
-        log_streams.push_back(std::make_pair(&std::cerr, LogLevel::WARNING_MSG));
-    } else {
-        log_streams.push_back(std::make_pair(&std::cerr, LogLevel::LOG_MSG));
-    }
-
-    if (vm.count("log")) {
-        std::string logfilename = vm["log"].as<std::string>();
-        logfile = std::ofstream(logfilename);
-        if (!logfile)
-            log_error("Failed to open log file '%s' for writing.\n", logfilename.c_str());
-        log_streams.push_back(std::make_pair(&logfile, LogLevel::LOG_MSG));
     }
 
     if (vm.count("force")) {
@@ -172,10 +177,20 @@ void CommandHandler::setupContext(Context *ctx)
         }
     }
 
+    if (vm.count("ignore-loops")) {
+        settings->set("timing/ignoreLoops", true);
+    }
+
     if (vm.count("cstrweight")) {
         settings->set("placer1/constraintWeight", vm["cstrweight"].as<float>());
     }
+    if (vm.count("starttemp")) {
+        settings->set("placer1/startTemp", vm["starttemp"].as<float>());
+    }
 
+    if (vm.count("placer-budgets")) {
+        settings->set("placer1/budgetBased", true);
+    }
     if (vm.count("freq")) {
         auto freq = vm["freq"].as<double>();
         if (freq > 0)

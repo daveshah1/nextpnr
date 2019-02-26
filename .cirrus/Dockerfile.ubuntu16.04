@@ -8,7 +8,7 @@ RUN set -e -x ;\
     apt-get -y install \
         build-essential autoconf cmake clang bison wget flex gperf \
         libreadline-dev gawk tcl-dev libffi-dev graphviz xdot python3-dev \
-        libboost-all-dev qt5-default git libftdi-dev pkg-config
+        libboost-all-dev qt5-default git libftdi-dev pkg-config libeigen3-dev
 
 RUN set -e -x ;\
     mkdir -p /usr/local/src ;\
@@ -27,7 +27,7 @@ RUN set -e -x ;\
     cd /usr/local/src ;\
     git clone --recursive https://github.com/cliffordwolf/icestorm.git ;\
     cd icestorm ;\
-    git reset --hard 9671b760f84ca4006f0ef101a3e3b201df4eabb5 ;\
+    git reset --hard 3a2bfee5cbc0558641668114260d3f644d6b7c83 ;\
     make -j $(nproc) ;\
     make install
 
@@ -46,7 +46,7 @@ RUN set -e -x ;\
     cd /usr/local/src ;\
     git clone --recursive https://github.com/SymbiFlow/prjtrellis.git ;\
     cd prjtrellis ;\
-    git reset --hard de035a6e5e5818804a66b9408f0ad381b10957db ;\
+    git reset --hard 46e95314be7f8850db80ad1ef6b3359b091fad93 ;\
     cd libtrellis ;\
     cmake -DCMAKE_INSTALL_PREFIX=/usr . ;\
     make -j $(nproc) ;\

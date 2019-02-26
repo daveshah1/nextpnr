@@ -103,7 +103,7 @@ NPNR_PACKED_STRUCT(struct PIOInfoPOD {
     int32_t bel_index;
     RelPtr<char> function_name;
     int16_t bank;
-    int16_t padding;
+    int16_t dqsgroup;
 });
 
 NPNR_PACKED_STRUCT(struct PackagePinPOD {
@@ -204,7 +204,7 @@ NPNR_PACKED_STRUCT(struct ChipInfoPOD {
     RelPtr<SpeedGradePOD> speed_grades;
 });
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(EXTERNAL_CHIPDB_ROOT)
 extern const char *chipdb_blob_25k;
 extern const char *chipdb_blob_45k;
 extern const char *chipdb_blob_85k;
@@ -918,7 +918,7 @@ struct Arch : BaseCtx
     delay_t estimateDelay(WireId src, WireId dst) const;
     delay_t predictDelay(const NetInfo *net_info, const PortRef &sink) const;
     delay_t getDelayEpsilon() const { return 20; }
-    delay_t getRipupDelayPenalty() const { return 200; }
+    delay_t getRipupDelayPenalty() const { return 250; }
     float getDelayNS(delay_t v) const { return v * 0.001; }
     DelayInfo getDelayFromNS(float ns) const
     {
@@ -971,6 +971,8 @@ struct Arch : BaseCtx
 
     void assignArchInfo();
 
+    void permute_luts();
+
     std::vector<std::pair<std::string, std::string>> getTilesAtLocation(int row, int col);
     std::string getTileByTypeAndLocation(int row, int col, std::string type) const
     {
@@ -993,7 +995,22 @@ struct Arch : BaseCtx
         NPNR_ASSERT_FALSE_STR("no tile at (" + std::to_string(col) + ", " + std::to_string(row) + ") with type in set");
     }
 
+    std::string getTileByType(std::string type) const
+    {
+        for (int i = 0; i < chip_info->height * chip_info->width; i++) {
+            auto &tileloc = chip_info->tile_info[i];
+            for (int j = 0; j < tileloc.num_tiles; j++)
+                if (chip_info->tiletype_names[tileloc.tile_names[j].type_idx].get() == type)
+                    return tileloc.tile_names[j].name.get();
+        }
+        NPNR_ASSERT_FALSE_STR("no with type " + type);
+    }
+
     GlobalInfoPOD globalInfoAtLoc(Location loc);
+
+    bool getPIODQSGroup(BelId pio, bool &dqsright, int &dqsrow);
+    BelId getDQSBUF(bool dqsright, int dqsrow);
+    WireId getBankECLK(int bank, int eclk);
 
     // Apply LPF constraints to the context
     bool applyLPF(std::string filename, std::istream &in);

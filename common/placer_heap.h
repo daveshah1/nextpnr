@@ -1,7 +1,7 @@
 /*
  *  nextpnr -- Next Generation Place and Route
  *
- *  Copyright (C) 2018  Miodrag Milanovic <miodrag@symbioticeda.com>
+ *  Copyright (C) 2019  David Shah <david@symbioticeda.com>
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
@@ -15,13 +15,33 @@
  *  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  *  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ *  [[cite]] HeAP
+ *  Analytical Placement for Heterogeneous FPGAs, Marcel Gort and Jason H. Anderson
+ *  https://janders.eecg.utoronto.ca/pdfs/marcelfpl12.pdf
+ *
+ *  [[cite]] SimPL
+ *  SimPL: An Effective Placement Algorithm, Myung-Chul Kim, Dong-Jin Lee and Igor L. Markov
+ *  http://www.ece.umich.edu/cse/awards/pdfs/iccad10-simpl.pdf
  */
 
-#include <vector>
-#include "gtest/gtest.h"
+#ifndef PLACER_HEAP_H
+#define PLACER_HEAP
+#include "nextpnr.h"
+#include "settings.h"
 
-int main(int argc, char **argv)
+NEXTPNR_NAMESPACE_BEGIN
+
+struct PlacerHeapCfg : public Settings
 {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+    PlacerHeapCfg(Context *ctx);
+
+    float alpha;
+    float criticalityExponent;
+    float timingWeight;
+
+    std::unordered_set<IdString> ioBufTypes;
+};
+
+extern bool placer_heap(Context *ctx, PlacerHeapCfg cfg);
+NEXTPNR_NAMESPACE_END
+#endif
