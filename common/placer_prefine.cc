@@ -969,15 +969,19 @@ class ParallelRefinementPlacer
                 for (int i = 0; i < M; i++) {
                     BelId old_bel = ci->bel;
                     BelId try_bel = random_bel_for_cell(ci, rng);
+                    if (try_bel == BelId() || try_bel == old_bel)
+                        continue;
                     CellInfo *bound = ctx->getBoundBelCell(try_bel);
                     if (bound != nullptr) {
                         if (bound->belStrength >= STRENGTH_STRONG || is_constrained(bound))
                             continue;
                     }
+                    ci->bel = try_bel;
                     add_move_cell(d.moveChange, ci, old_bel);
-                    if (bound != nullptr)
-                        add_move_cell(d.moveChange, ci, try_bel);
-
+                    if (bound != nullptr) {
+                        bound->bel = old_bel;
+                        add_move_cell(d.moveChange, bound, try_bel);
+                    }
                     compute_cost_changes(d.moveChange);
                     double cost_delta = lambda * (d.moveChange.timing_delta / last_timing_cost) + (1 - lambda) * (double(d.moveChange.wirelen_delta) / double(last_wirelen_cost));
                     if (cost_delta < best_cost_delta) {
@@ -988,9 +992,14 @@ class ParallelRefinementPlacer
                     ci->bel = old_bel;
                     if (bound != nullptr)
                         bound->bel = try_bel;
+                    NPNR_ASSERT(ci->bel != BelId());
+                    if (bound != nullptr)
+                        NPNR_ASSERT(bound->bel != BelId());
+
                     d.movedCells.clear();
                     d.moveChange.reset();
                 }
+                NPNR_ASSERT(ci->bel != BelId());
 
                 if (best_bel != BelId())
                     cell.second = best_bel;
@@ -1022,7 +1031,7 @@ class ParallelRefinementPlacer
     void run_threadpool() {
         // Split all the cells up into batches N cells, which are then split evenly between threads
         // This is a balance between QoR, and overhead dispatching work to threads
-        const size_t N = 60;
+        const size_t N = 192;
         for (size_t i = 0; i < autoplaced.size(); i += N) {
             uint64_t seed = ctx->rng64();
             size_t lb = i, ub = std::min(i + N, autoplaced.size());
@@ -1034,8 +1043,10 @@ class ParallelRefinementPlacer
                             lb + ((j + 1) * (ub - lb)) / threadpool.size();
                     p.seed = seed;
                     p.evalCells.clear();
-                    for (size_t k = jlb; k < jub; k++)
+                    for (size_t k = jlb; k < jub; k++) {
                         p.evalCells.emplace_back(autoplaced.at(k), BelId());
+                    }
+                    p.processed = false;
                     p.ready = true;
                 }
             }
@@ -1043,17 +1054,21 @@ class ParallelRefinementPlacer
                 p->cv.notify_one();
             // Wait for all threads to finish
             for (auto &p : threadpool) {
-                if (p->processed)
-                    continue;
+                //if (p->processed)
+                //    continue;
                 std::unique_lock<std::mutex> lk(p->m);
                 p->cv.wait(lk, [&]() { return p->processed; });
                 lk.unlock();
             }
             // Apply proposed changes from workers for real
             for (auto &p : threadpool)
-                for (auto &ec : p->evalCells)
-                    if (ec.second != BelId())
+                for (auto &ec : p->evalCells) {
+                    if (ec.second != BelId() && ec.second != ec.first->bel) {
+                        log_info("%s [%s] -> %s\n", ec.first->name.c_str(ctx), ctx->getBelName(ec.first->bel).c_str(ctx), ctx->getBelName(ec.second).c_str(ctx));
                         try_swap_position(ec.first, ec.second);
+                    }
+                }
+
         }
     }
 
