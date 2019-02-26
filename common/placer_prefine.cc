@@ -20,8 +20,10 @@
  */
 
 #include "placer1.h"
+#include "placer_prefine.h"
 #include <algorithm>
 #include <atomic>
+#include <boost/optional.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/range/adaptor/reversed.hpp>
 #include <chrono>
@@ -261,7 +263,7 @@ class ParallelRefinementPlacer
 
         int n_no_progress = 0;
         temp = refine ? 1e-7 : cfg.startTemp;
-
+        create_threadpool(8);
         // Main simulated annealing loop
         for (int iter = 1;; iter++) {
             n_move = n_accept = 0;
@@ -274,14 +276,7 @@ class ParallelRefinementPlacer
 
             for (int m = 0; m < 15; ++m) {
                 // Loop through all automatically placed cells
-                for (auto cell : autoplaced) {
-                    // Find another random Bel for this cell
-                    BelId try_bel = random_bel_for_cell(cell, [&](int n){return ctx->rng(n); });
-                    // If valid, try and swap to a new position and see if
-                    // the new position is valid/worthwhile
-                    if (try_bel != BelId() && try_bel != cell->bel)
-                        try_swap_position(cell, try_bel);
-                }
+                run_threadpool();
                 // Also try swapping chains, if applicable
                 for (auto cb : chain_basis) {
                     Loc chain_base_loc = ctx->getBelLocation(cb->bel);
@@ -374,7 +369,7 @@ class ParallelRefinementPlacer
             // Let the UI show visualization updates.
             ctx->yield();
         }
-
+        kill_threadpool();
         auto saplace_end = std::chrono::high_resolution_clock::now();
         log_info("SA placement time %.02fs\n", std::chrono::duration<float>(saplace_end - saplace_start).count());
 
@@ -911,20 +906,21 @@ class ParallelRefinementPlacer
 
         std::thread t;
         std::mutex m;
-        std::unique_lock<std::mutex> host_lk;
         std::condition_variable cv;
         bool ready = false, processed = false, die = false;
     };
 
+    std::vector<MoveEvaluatorData*> threadpool;
 
-    void move_evaluator_thread(MoveEvaluatorData &d) {
+    void move_evaluator_thread(int k) {
+        MoveEvaluatorData &d = *(threadpool.at(k));
         while (true) {
             std::unique_lock<std::mutex> lk(d.m);
-            d.cv.wait(lk, [&]{return d.ready;});
+            if (!d.ready)
+                d.cv.wait(lk, [&]{return d.ready;});
             if (d.die)
                 return;
             d.ready = false;
-
             for (auto &cell : d.evalCells) {
                 CellInfo *ci = cell.first;
 
@@ -1006,14 +1002,20 @@ class ParallelRefinementPlacer
         }
     }
 
-    std::vector<MoveEvaluatorData> threadpool;
 
     void create_threadpool(int n) {
         threadpool.resize(n);
-        for (auto &p : threadpool) {
-            p.host_lk = std::unique_lock<std::mutex>(p.m);
-            p.host_lk.lock();
-            p.t = std::thread([&]() { move_evaluator_thread(p); });
+        for (int i = 0; i < n; i++) {
+            MoveEvaluatorData *p = new MoveEvaluatorData();
+            threadpool.at(i) = p;
+            p->moveChange.already_bounds_changed.resize(ctx->nets.size());
+            p->moveChange.already_changed_arcs.resize(ctx->nets.size());
+            for (auto &net : ctx->nets) {
+                NetInfo *ni = net.second.get();
+                p->moveChange.already_changed_arcs.at(ni->udata).resize(ni->users.size());
+            }
+            p->t = std::thread([this, i]() { move_evaluator_thread(i); });
+            p->workerid = i;
         }
     }
 
@@ -1025,21 +1027,31 @@ class ParallelRefinementPlacer
             uint64_t seed = ctx->rng64();
             size_t lb = i, ub = std::min(i + N, autoplaced.size());
             for (size_t j = 0; j < threadpool.size(); j++) {
-                auto &p = threadpool.at(j);
-                size_t jlb = lb + (j * (ub - lb)) / threadpool.size(), jub = lb + ((j + 1) * (ub - lb)) / threadpool.size();
-                p.evalCells.clear();
-                for (size_t k = jlb; k < jub; k++)
-                    p.evalCells.emplace_back(autoplaced.at(k), BelId());
-                p.ready = true;
-                p.host_lk.unlock();
-                p.cv.notify_one();
+                auto &p = *threadpool.at(j);
+                {
+                    std::lock_guard<std::mutex> lk(p.m);
+                    size_t jlb = lb + (j * (ub - lb)) / threadpool.size(), jub =
+                            lb + ((j + 1) * (ub - lb)) / threadpool.size();
+                    p.seed = seed;
+                    p.evalCells.clear();
+                    for (size_t k = jlb; k < jub; k++)
+                        p.evalCells.emplace_back(autoplaced.at(k), BelId());
+                    p.ready = true;
+                }
             }
-            // Wait for all threads to finish
             for (auto &p : threadpool)
-                p.cv.wait(p.host_lk, [&](){return p.processed; });
+                p->cv.notify_one();
+            // Wait for all threads to finish
+            for (auto &p : threadpool) {
+                if (p->processed)
+                    continue;
+                std::unique_lock<std::mutex> lk(p->m);
+                p->cv.wait(lk, [&]() { return p->processed; });
+                lk.unlock();
+            }
             // Apply proposed changes from workers for real
             for (auto &p : threadpool)
-                for (auto &ec : p.evalCells)
+                for (auto &ec : p->evalCells)
                     if (ec.second != BelId())
                         try_swap_position(ec.first, ec.second);
         }
@@ -1047,11 +1059,12 @@ class ParallelRefinementPlacer
 
     void kill_threadpool() {
         for (auto &p : threadpool) {
-            p.die = true;
-            p.ready = true;
-            p.host_lk.release();
-            p.cv.notify_one();
-            p.t.join();
+            p->die = true;
+            p->ready = true;
+            p->cv.notify_one();
+            p->t.join();
+            delete p;
+            p = nullptr;
         }
         threadpool.clear();
     }
@@ -1104,36 +1117,7 @@ class ParallelRefinementPlacer
     Placer1Cfg cfg;
 };
 
-Placer1Cfg::Placer1Cfg(Context *ctx) : Settings(ctx)
-{
-    constraintWeight = get<float>("placer1/constraintWeight", 10);
-    minBelsForGridPick = get<int>("placer1/minBelsForGridPick", 64);
-    budgetBased = get<bool>("placer1/budgetBased", false);
-    startTemp = get<float>("placer1/startTemp", 1);
-    timingFanoutThresh = std::numeric_limits<int>::max();
-}
-
-bool placer1(Context *ctx, Placer1Cfg cfg)
-{
-    try {
-        ParallelRefinementPlacer placer(ctx, cfg);
-        placer.place();
-        log_info("Checksum: 0x%08x\n", ctx->checksum());
-#ifndef NDEBUG
-        ctx->lock();
-        ctx->check();
-        ctx->unlock();
-#endif
-        return true;
-    } catch (log_execution_error_exception) {
-#ifndef NDEBUG
-        ctx->check();
-#endif
-        return false;
-    }
-}
-
-bool placer1_refine(Context *ctx, Placer1Cfg cfg)
+bool parallel_refine(Context *ctx, Placer1Cfg cfg)
 {
     try {
         ParallelRefinementPlacer placer(ctx, cfg);
