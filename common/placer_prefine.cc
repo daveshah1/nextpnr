@@ -278,12 +278,14 @@ class ParallelRefinementPlacer
                 // Loop through all automatically placed cells
                 run_threadpool();
                 // Also try swapping chains, if applicable
+                /*
                 for (auto cb : chain_basis) {
                     Loc chain_base_loc = ctx->getBelLocation(cb->bel);
                     BelId try_base = random_bel_for_cell(cb,  [&](int n){return ctx->rng(n); }, chain_base_loc.z);
                     if (try_base != BelId() && try_base != cb->bel)
                         try_swap_chain(cb, try_base);
                 }
+                */
             }
 
             if (curr_wirelen_cost < min_wirelen) {
@@ -517,7 +519,10 @@ class ParallelRefinementPlacer
         delta = lambda * (moveChange.timing_delta / std::max<double>(last_timing_cost, epsilon)) +
                 (1 - lambda) * (double(moveChange.wirelen_delta) / std::max<double>(last_wirelen_cost, epsilon));
         delta += (cfg.constraintWeight / temp) * (new_dist - old_dist) / last_wirelen_cost;
+        //log_info("r %f\n", delta);
+
         // SA acceptance criterea
+        /*
         if (delta < 0 || (temp > 1e-8 && (ctx->rng() / float(0x3fffffff)) <= std::exp(-delta / temp))) {
         } else {
             if (other_cell != nullptr)
@@ -525,6 +530,7 @@ class ParallelRefinementPlacer
             ctx->unbindBel(newBel);
             goto swap_fail;
         }
+         */
         commit_cost_changes(moveChange);
 #if 0
         log_info("swap %s -> %s\n", cell->name.c_str(ctx), ctx->getBelName(newBel).c_str(ctx));
@@ -630,6 +636,7 @@ class ParallelRefinementPlacer
                 (1 - lambda) * (double(moveChange.wirelen_delta) / last_wirelen_cost);
         n_move++;
         // SA acceptance criterea
+        /*
         if (delta < 0 || (temp > 1e-9 && (ctx->rng() / float(0x3fffffff)) <= std::exp(-delta / temp))) {
             n_accept++;
             if (ctx->debug)
@@ -637,6 +644,7 @@ class ParallelRefinementPlacer
         } else {
             goto swap_fail;
         }
+         */
         commit_cost_changes(moveChange);
         return true;
     swap_fail:
@@ -679,7 +687,7 @@ class ParallelRefinementPlacer
             const auto &fb = fast_bels.at(beltype_idx).at(nx).at(ny);
             if (fb.size() == 0)
                 continue;
-            BelId bel = fb.at(ctx->rng(int(fb.size())));
+            BelId bel = fb.at(custom_rng(int(fb.size())));
             if (force_z != -1) {
                 Loc loc = ctx->getBelLocation(bel);
                 if (loc.z != force_z)
@@ -741,13 +749,13 @@ class ParallelRefinementPlacer
             if (crit == net_crit.end() || crit->second.criticality.empty())
                 return 0;
             double delay;
-            if (movedCells.count(net->driver.cell->name) || movedCells.count(net->users.at(user).cell->name)) {
+            //if (movedCells.count(net->driver.cell->name) || movedCells.count(net->users.at(user).cell->name)) {
                 // Have to use estimateDelay here
                 BelId src = cell_bel(net->driver.cell, movedCells), dest = cell_bel(net->users.at(user).cell, movedCells);
                 delay = ctx->getDelayNS(ctx->estimateDelay(ctx->getBelPinWire(src, net->driver.port), ctx->getBelPinWire(dest, net->users.at(user).port)));
-            } else {
-               delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
-            }
+            //} else {
+            //  delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
+            //}
             return delay * std::pow(crit->second.criticality.at(user), crit_exp);
         }
     }
@@ -982,6 +990,8 @@ class ParallelRefinementPlacer
                 BelId best_bel;
                 double best_cost_delta = std::numeric_limits<double>::max();
                 for (int i = 0; i < M; i++) {
+                    d.movedCells.clear();
+                    d.moveChange.reset();
                     BelId old_bel = ci->bel;
                     BelId try_bel = random_bel_for_cell(ci, rng);
                     if (try_bel == BelId() || try_bel == old_bel)
@@ -998,21 +1008,23 @@ class ParallelRefinementPlacer
                         add_move_cell(d.moveChange, bound, try_bel, d.movedCells);
                     }
                     compute_cost_changes(d.moveChange, d.movedCells);
-                    double cost_delta = lambda * (d.moveChange.timing_delta / last_timing_cost) +
+                    double cost_delta = lambda * (d.moveChange.timing_delta / std::max(0.01, last_timing_cost)) +
                                         (1 - lambda) * (double(d.moveChange.wirelen_delta) / double(last_wirelen_cost));
+                    //log_info("d %d\n", d.moveChange.wirelen_delta);
+                    //log_info("e %f\n", cost_delta);
+
                     if (cost_delta < best_cost_delta) {
                         best_cost_delta = cost_delta;
                         best_bel = try_bel;
                     }
-                    d.movedCells.clear();
-                    d.moveChange.reset();
                 }
 
                 if (best_bel != BelId()) {
                     d.moves++;
-                    if (best_cost_delta < 0 || (temp > 1e-9 && (rng(0x3fffffff) / float(0x3fffffff)) <=
+                    if (best_cost_delta < 0 || (temp > 1e-8 && (rng(0x3fffffff) / float(0x3fffffff)) <=
                                                                std::exp(-best_cost_delta / temp))) {
-                        log_info("%f %d\n", best_cost_delta, rng(10));
+                        //log_info("eee %f\n", best_cost_delta);
+
                         cell.second = best_bel;
                         d.accepted++;
                     }
@@ -1044,7 +1056,7 @@ class ParallelRefinementPlacer
     void run_threadpool() {
         // Split all the cells up into batches N cells, which are then split evenly between threads
         // This is a balance between QoR, and overhead dispatching work to threads
-        const size_t N = 32;
+        const size_t N = 192;
         ctx->shuffle(autoplaced);
         for (size_t i = 0; i < autoplaced.size(); i += N) {
             uint64_t seed = ctx->rng64();
@@ -1055,6 +1067,7 @@ class ParallelRefinementPlacer
                     std::lock_guard<std::mutex> lk(p.m);
                     size_t jlb = lb + (j * (ub - lb)) / threadpool.size(), jub =
                             lb + ((j + 1) * (ub - lb)) / threadpool.size();
+                    //log_info("%d %d\n", int(jlb), int(jub));
                     p.seed = seed;
                     p.evalCells.clear();
                     for (size_t k = jlb; k < jub; k++) {
