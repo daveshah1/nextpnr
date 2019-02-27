@@ -48,7 +48,7 @@
 #include "log.h"
 #include "nextpnr.h"
 #include "place_common.h"
-#include "placer1.h"
+#include "placer_prefine.h"
 #include "timing.h"
 #include "util.h"
 NEXTPNR_NAMESPACE_BEGIN
@@ -286,7 +286,7 @@ class HeAPPlacer
 
         ctx->check();
 
-        placer1_refine(ctx, Placer1Cfg(ctx));
+        parallel_refine(ctx, Placer1Cfg(ctx));
 
         return true;
     }
