@@ -26,6 +26,7 @@
 #include "log.h"
 #include "nextpnr.h"
 #include "placer1.h"
+#include "placer_heap.h"
 #include "router1.h"
 #include "util.h"
 
@@ -659,7 +660,14 @@ bool Arch::getBudgetOverride(const NetInfo *net_info, const PortRef &sink, delay
 
 // -----------------------------------------------------------------------
 
-bool Arch::place() { return placer1(getCtx(), Placer1Cfg(getCtx())); }
+bool Arch::place() {
+    PlacerHeapCfg cfg(getCtx());
+    cfg.ioBufTypes.insert(id_IOB33);
+    cfg.ioBufTypes.insert(id_IOB18);
+    if (!placer_heap(getCtx(), cfg))
+        return false;
+    return true;
+}
 
 bool Arch::route() { return router1(getCtx(), Router1Cfg(getCtx())); }
 

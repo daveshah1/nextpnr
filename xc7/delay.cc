@@ -81,4 +81,25 @@ delay_t Arch::predictDelay(const NetInfo *net_info, const PortRef &sink) const
            (num_H1 + num_V1) * 150;
 }
 
+delay_t Arch::predictDelay(BelId srcBel, IdString srcPort, BelId sinkBel, IdString snkPort) const {
+    auto driver_loc = getBelLocation(srcBel);
+    auto sink_loc = getBelLocation(sinkBel);
+    auto abs_delta_x = abs(driver_loc.x - sink_loc.x);
+    auto abs_delta_y = abs(driver_loc.y - sink_loc.y);
+    auto div_LH = std::div(abs_delta_x, 12);
+    auto div_LV = std::div(abs_delta_y, 18);
+    auto div_LVB = std::div(div_LV.rem, 12);
+    auto div_H6 = std::div(div_LH.rem, 6);
+    auto div_V6 = std::div(div_LVB.rem, 6);
+    auto div_H4 = std::div(div_H6.rem, 4);
+    auto div_V4 = std::div(div_V6.rem, 4);
+    auto div_H2 = std::div(div_H4.rem, 2);
+    auto div_V2 = std::div(div_V4.rem, 2);
+    auto num_H1 = div_H2.rem;
+    auto num_V1 = div_V2.rem;
+    return div_LH.quot * 360 + div_LVB.quot * 300 + div_LV.quot * 350 +
+           (div_H6.quot + div_H4.quot + div_V6.quot + div_V4.quot) * 210 + (div_H2.quot + div_V2.quot) * 170 +
+           (num_H1 + num_V1) * 150;
+}
+
 NEXTPNR_NAMESPACE_END

@@ -262,7 +262,7 @@ class ParallelRefinementPlacer
         wirelen_t min_wirelen = curr_wirelen_cost;
 
         int n_no_progress = 0;
-        temp = refine ? 1e-7 : cfg.startTemp;
+        temp = refine ? 1e-8 : cfg.startTemp;
         create_threadpool(8);
         // Main simulated annealing loop
         for (int iter = 1;; iter++) {
@@ -749,13 +749,16 @@ class ParallelRefinementPlacer
             if (crit == net_crit.end() || crit->second.criticality.empty())
                 return 0;
             double delay;
-            //if (movedCells.count(net->driver.cell->name) || movedCells.count(net->users.at(user).cell->name)) {
+            #if 0
+            if (movedCells.count(net->driver.cell->name) || movedCells.count(net->users.at(user).cell->name)) {
                 // Have to use estimateDelay here
                 BelId src = cell_bel(net->driver.cell, movedCells), dest = cell_bel(net->users.at(user).cell, movedCells);
                 delay = ctx->getDelayNS(ctx->estimateDelay(ctx->getBelPinWire(src, net->driver.port), ctx->getBelPinWire(dest, net->users.at(user).port)));
-            //} else {
-            //  delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
-            //}
+            } else {
+              delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
+            }
+            #endif
+            delay = ctx->getDelayNS(ctx->predictDelay(cell_bel(net->driver.cell, movedCells), net->driver.port, cell_bel(net->users.at(user).cell, movedCells), net->users.at(user).port));
             return delay * std::pow(crit->second.criticality.at(user), crit_exp);
         }
     }
