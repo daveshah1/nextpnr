@@ -720,6 +720,9 @@ struct Arch : BaseCtx
     }
 
     float placer_constraintWeight = 10;
+
+    static const std::string defaultPlacer;
+    static const std::vector<std::string> availablePlacers;
 };
 
 NEXTPNR_NAMESPACE_END

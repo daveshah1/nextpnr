@@ -26,6 +26,7 @@
 #include "log.h"
 #include "nextpnr.h"
 #include "placer1.h"
+#include "placer_heap.h"
 #include "router1.h"
 #include "util.h"
 
@@ -659,7 +660,26 @@ bool Arch::getBudgetOverride(const NetInfo *net_info, const PortRef &sink, delay
 
 // -----------------------------------------------------------------------
 
-bool Arch::place() { return placer1(getCtx(), Placer1Cfg(getCtx())); }
+bool Arch::place() {
+    std::string placer = str_or_default(settings, id("placer"), defaultPlacer);
+
+    if (placer == "heap") {
+        PlacerHeapCfg cfg(getCtx());
+        cfg.criticalityExponent = 7;
+        cfg.ioBufTypes.insert(id_IOB33);
+        cfg.ioBufTypes.insert(id_IOB33);
+
+        if (!placer_heap(getCtx(), cfg))
+            return false;
+    } else if (placer == "sa") {
+        if (!placer1(getCtx(), Placer1Cfg(getCtx())))
+            return false;
+    } else {
+        log_error("xc7 architecture does not support placer '%s'\n", placer.c_str());
+    }
+
+    return true;
+}
 
 bool Arch::route() { return router1(getCtx(), Router1Cfg(getCtx())); }
 
@@ -875,5 +895,17 @@ void Arch::assignCellInfo(CellInfo *cell)
             cell->lcInfo.inputCount++;
     }
 }
+
+#ifdef WITH_HEAP
+const std::string Arch::defaultPlacer = "heap";
+#else
+const std::string Arch::defaultPlacer = "sa";
+#endif
+
+const std::vector<std::string> Arch::availablePlacers = {"sa",
+#ifdef WITH_HEAP
+                                                         "heap"
+#endif
+};
 
 NEXTPNR_NAMESPACE_END

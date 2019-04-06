@@ -20,7 +20,7 @@ if (NOT DEFINED TORC_ROOT)
         add_dependencies(nextpnr-${family}-test torc)
     endif()
     add_custom_target(torc ALL
-                      COMMAND $(MAKE) > /dev/null 2> /dev/null
+                      COMMAND $(MAKE)
                       COMMENT "Building torc (may take some time...)"
                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/torc/src)
     set(TORC_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/torc)
