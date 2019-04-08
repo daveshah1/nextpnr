@@ -32,6 +32,7 @@ struct Placer1Cfg : public Settings
     bool budgetBased;
     float startTemp;
     int timingFanoutThresh;
+    float critDropTol;
 };
 
 extern bool placer1(Context *ctx, Placer1Cfg cfg);

@@ -772,6 +772,8 @@ class SAPlacer
             auto crit = net_crit.find(net->name);
             if (crit == net_crit.end() || crit->second.criticality.empty())
                 return 0;
+            if (crit->second.criticality.at(user) < cfg.critDropTol)
+                return 0;
             double delay = ctx->getDelayNS(ctx->predictDelay(net, net->users.at(user)));
             return delay * std::pow(crit->second.criticality.at(user), crit_exp);
         }
@@ -1005,17 +1007,25 @@ class SAPlacer
                 if (port.second.type == PORT_OUT) {
                     int cc;
                     TimingPortClass cls = ctx->getPortTimingClass(cell, port.first, cc);
-                    if (cls != TMG_IGNORE)
-                        for (size_t i = 0; i < pn->users.size(); i++)
-                            if (!mc.already_changed_arcs[pn->udata][i]) {
-                                mc.changed_arcs.emplace_back(std::make_pair(pn->udata, i));
-                                mc.already_changed_arcs[pn->udata][i] = true;
-                            }
+                    if (cls != TMG_IGNORE) {
+                        auto crit = net_crit.find(pn->name);
+                        if (crit != net_crit.end() && !crit->second.criticality.empty())
+                            for (size_t i = 0; i < pn->users.size(); i++)
+                                if (!mc.already_changed_arcs[pn->udata][i]) {
+                                    if (crit->second.criticality.at(i) < cfg.critDropTol)
+                                        continue;
+                                    mc.changed_arcs.emplace_back(std::make_pair(pn->udata, i));
+                                    mc.already_changed_arcs[pn->udata][i] = true;
+                                }
+                    }
                 } else if (port.second.type == PORT_IN) {
                     auto usr = fast_port_to_user.at(&port.second);
                     if (!mc.already_changed_arcs[pn->udata][usr]) {
-                        mc.changed_arcs.emplace_back(std::make_pair(pn->udata, usr));
-                        mc.already_changed_arcs[pn->udata][usr] = true;
+                        auto crit = net_crit.find(pn->name);
+                        if (crit != net_crit.end() && !crit->second.criticality.empty() && crit->second.criticality.at(usr) >= cfg.critDropTol) {
+                            mc.changed_arcs.emplace_back(std::make_pair(pn->udata, usr));
+                            mc.already_changed_arcs[pn->udata][usr] = true;
+                        }
                     }
                 }
             }
@@ -1115,6 +1125,7 @@ Placer1Cfg::Placer1Cfg(Context *ctx) : Settings(ctx)
     minBelsForGridPick = get<int>("placer1/minBelsForGridPick", 64);
     budgetBased = get<bool>("placer1/budgetBased", false);
     startTemp = get<float>("placer1/startTemp", 1);
+    critDropTol = get<float>("placer1/critDropTol", 0.15);
     timingFanoutThresh = std::numeric_limits<int>::max();
 }
 
