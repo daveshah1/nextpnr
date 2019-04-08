@@ -786,9 +786,11 @@ bool router1(Context *ctx, const Router1Cfg &cfg)
 
         log_info("           |   (re-)routed arcs  |   delta    | remaining\n");
         log_info("   IterCnt |  w/ripup   wo/ripup |  w/r  wo/r |      arcs\n");
-
+        auto last_update = rstart;
         while (!router.arc_queue.empty()) {
-            if (++iter_cnt % 1000 == 0) {
+            auto now = std::chrono::high_resolution_clock::now();
+            if ((++iter_cnt % 1000 == 0) || (std::chrono::duration<float>(now - last_update).count() > 15)) {
+                last_update = std::chrono::high_resolution_clock::now();
                 log_info("%10d | %8d %10d | %4d %5d | %9d\n", iter_cnt, router.arcs_with_ripup,
                          router.arcs_without_ripup, router.arcs_with_ripup - last_arcs_with_ripup,
                          router.arcs_without_ripup - last_arcs_without_ripup, int(router.arc_queue.size()));
