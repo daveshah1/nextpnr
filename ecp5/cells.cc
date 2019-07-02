@@ -216,10 +216,13 @@ static void set_param_safe(bool has_ff, CellInfo *lc, IdString name, const std::
     lc->params[name] = value;
 }
 
-static void replace_port_safe(bool has_ff, CellInfo *ff, IdString ff_port, CellInfo *lc, IdString lc_port)
+static void replace_port_safe(Context *ctx, bool has_ff, CellInfo *ff, IdString ff_port, CellInfo *lc, IdString lc_port)
 {
     if (has_ff) {
-        NPNR_ASSERT(lc->ports.at(lc_port).net == ff->ports.at(ff_port).net);
+        if (lc->ports.at(lc_port).net != ff->ports.at(ff_port).net)
+            log_error("Internal packer conflict %s.%s %s vs %s\n", lc->name.c_str(ctx),
+                    lc_port.c_str(ctx), lc->ports.at(lc_port).net ? ctx->nameOf(lc->ports.at(lc_port).net) : "<nullptr>",
+                      ff->ports.at(ff_port).net ? ctx->nameOf(ff->ports.at(ff_port).net) : "<nullptr>");
         NetInfo *ffnet = ff->ports.at(ff_port).net;
         if (ffnet != nullptr)
             ffnet->users.erase(
@@ -243,11 +246,11 @@ void ff_to_slice(Context *ctx, CellInfo *ff, CellInfo *lc, int index, bool drive
 
     lc->params[ctx->id(reg + "_SD")] = driven_by_lut ? "1" : "0";
     lc->params[ctx->id(reg + "_REGSET")] = str_or_default(ff->params, ctx->id("REGSET"), "RESET");
-    replace_port_safe(has_ff, ff, ctx->id("CLK"), lc, ctx->id("CLK"));
+    replace_port_safe(ctx, has_ff, ff, ctx->id("CLK"), lc, ctx->id("CLK"));
     if (ff->ports.find(ctx->id("LSR")) != ff->ports.end())
-        replace_port_safe(has_ff, ff, ctx->id("LSR"), lc, ctx->id("LSR"));
+        replace_port_safe(ctx, has_ff, ff, ctx->id("LSR"), lc, ctx->id("LSR"));
     if (ff->ports.find(ctx->id("CE")) != ff->ports.end())
-        replace_port_safe(has_ff, ff, ctx->id("CE"), lc, ctx->id("CE"));
+        replace_port_safe(ctx, has_ff, ff, ctx->id("CE"), lc, ctx->id("CE"));
 
     replace_port(ff, ctx->id("Q"), lc, ctx->id("Q" + std::to_string(index)));
     if (driven_by_lut) {

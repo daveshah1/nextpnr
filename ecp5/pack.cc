@@ -75,6 +75,87 @@ class Ecp5Packer
         }
     }
 
+    // Find FFs driven by the same cell
+    void find_ff_ff_pairs()
+    {
+        log_info("Finding flipflop pairs...\n");
+        for (auto cell : sorted(ctx->cells)) {
+            CellInfo *ci = cell.second;
+            if (is_ff(ctx, ci) && !ffffPairs.count(ci->name) && !fflutPairs.count(ci->name)) {
+                NetInfo *dinet = ci->ports.at(ctx->id("DI")).net;
+                if (dinet == nullptr || dinet->driver.cell == nullptr)
+                    continue;
+                CellInfo *drv = dinet->driver.cell;
+                if (is_lc(ctx, drv) || drv->type == ctx->id("DP16KD")) {
+                    for (auto &port : drv->ports) {
+                        NetInfo *pn = port.second.net;
+                        if (port.second.type == PORT_OUT) {
+                            if (pn == nullptr || pn->driver.cell == nullptr)
+                                continue;
+                            CellInfo *drv2 = pn->driver.cell;
+                            if (!is_ff(ctx, drv2) || pn->driver.port != ctx->id("Q"))
+                                continue;
+                            if (drv2 == ci || ffffPairs.count(drv2->name) ||
+                                fflutPairs.count(drv2->name))
+                                continue;
+                            if (!can_pack_ffs(ci, drv2))
+                                continue;
+                            ffffPairs[ci->name] = drv2->name;
+                            ffffPairs[drv2->name] = ci->name;
+                            goto paired;
+                        } else {
+                            if (pn == nullptr || pn->users.size() > 10)
+                                continue;
+                            for (auto &usr : pn->users) {
+                                if (!is_ff(ctx, usr.cell) || usr.port != ctx->id("DI"))
+                                    continue;
+                                if (usr.cell == ci || ffffPairs.count(usr.cell->name) ||
+                                    fflutPairs.count(usr.cell->name))
+                                    continue;
+                                if (!can_pack_ffs(ci, usr.cell))
+                                    continue;
+                                ffffPairs[ci->name] = usr.cell->name;
+                                ffffPairs[usr.cell->name] = ci->name;
+                                goto paired;
+                            }
+                        }
+                    }
+                }
+            }
+            paired:
+                continue;
+        }
+        for (auto cell : sorted(ctx->cells)) {
+            CellInfo *ci = cell.second;
+            if (is_ff(ctx, ci) && !ffffPairs.count(ci->name) && !fflutPairs.count(ci->name)) {
+                NetInfo *qnet = ci->ports.at(ctx->id("Q")).net;
+                if (qnet == nullptr || qnet->users.size() > 10)
+                    continue;
+                for (auto &usr : qnet->users) {
+                    if (!is_ff(ctx, usr.cell) || usr.port != ctx->id("DI"))
+                        continue;
+                    if (usr.cell == ci || ffffPairs.count(usr.cell->name) || fflutPairs.count(usr.cell->name))
+                        continue;
+                    if (!can_pack_ffs(ci, usr.cell))
+                        continue;
+                    ffffPairs[ci->name] = usr.cell->name;
+                    ffffPairs[usr.cell->name] = ci->name;
+                    goto paired2;
+                }
+                paired2:
+                    continue;
+            }
+        }
+        int paired_ffs = int(ffffPairs.size());
+        int unpaired_ffs = 0;
+        for (auto cell : sorted(ctx->cells)) {
+            CellInfo *ci = cell.second;
+            if (is_ff(ctx, ci) && !ffffPairs.count(ci->name))
+                unpaired_ffs++;
+        }
+        log_info("%d paired FFs, %d unpaired FFs\n", paired_ffs, unpaired_ffs);
+    }
+
     const NetInfo *net_or_nullptr(CellInfo *cell, IdString port)
     {
         auto fnd = cell->ports.find(port);
@@ -1020,12 +1101,17 @@ class Ecp5Packer
         log_info("Packing unpaired FFs into a SLICE...\n");
         for (auto cell : sorted(ctx->cells)) {
             CellInfo *ci = cell.second;
-            if (is_ff(ctx, ci)) {
+            if (is_ff(ctx, ci) && !packed_cells.count(ci->name)) {
                 std::unique_ptr<CellInfo> slice =
                         create_ecp5_cell(ctx, ctx->id("TRELLIS_SLICE"), ci->name.str(ctx) + "_SLICE");
                 ff_to_slice(ctx, ci, slice.get(), 0, false);
-                new_cells.push_back(std::move(slice));
                 packed_cells.insert(ci->name);
+                if (ffffPairs.count(ci->name)) {
+                    CellInfo *other = ctx->cells.at(ffffPairs.at(ci->name)).get();
+                    ff_to_slice(ctx, other, slice.get(), 1, false);
+                    packed_cells.insert(other->name);
+                }
+                new_cells.push_back(std::move(slice));
             }
         }
         flush_cells();
@@ -2394,6 +2480,7 @@ class Ecp5Packer
         pair_luts();
         pack_lut_pairs();
         pack_remaining_luts();
+        find_ff_ff_pairs();
         pack_remaining_ffs();
         generate_constraints();
         promote_ecp5_globals(ctx);
@@ -2417,6 +2504,7 @@ class Ecp5Packer
     std::unordered_map<IdString, SliceUsage> sliceUsage;
     std::unordered_map<IdString, IdString> lutffPairs;
     std::unordered_map<IdString, IdString> fflutPairs;
+    std::unordered_map<IdString, IdString> ffffPairs;
     std::unordered_map<IdString, IdString> lutPairs;
 };
 // Main pack function
