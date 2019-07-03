@@ -83,44 +83,58 @@ class Ecp5Packer
             CellInfo *ci = cell.second;
             if (is_ff(ctx, ci) && !ffffPairs.count(ci->name) && !fflutPairs.count(ci->name)) {
                 NetInfo *dinet = ci->ports.at(ctx->id("DI")).net;
-                if (dinet == nullptr || dinet->driver.cell == nullptr)
+                if (dinet == nullptr)
                     continue;
                 CellInfo *drv = dinet->driver.cell;
-                if (is_lc(ctx, drv) || drv->type == ctx->id("DP16KD")) {
-                    for (auto &port : drv->ports) {
-                        NetInfo *pn = port.second.net;
-                        if (port.second.type == PORT_OUT) {
-                            if (pn == nullptr || pn->driver.cell == nullptr)
-                                continue;
-                            CellInfo *drv2 = pn->driver.cell;
-                            if (!is_ff(ctx, drv2) || pn->driver.port != ctx->id("Q"))
-                                continue;
-                            if (drv2 == ci || ffffPairs.count(drv2->name) ||
-                                fflutPairs.count(drv2->name))
-                                continue;
-                            if (!can_pack_ffs(ci, drv2))
-                                continue;
-                            ffffPairs[ci->name] = drv2->name;
-                            ffffPairs[drv2->name] = ci->name;
-                            goto paired;
-                        } else {
-                            if (pn == nullptr || pn->users.size() > 10)
-                                continue;
-                            for (auto &usr : pn->users) {
-                                if (!is_ff(ctx, usr.cell) || usr.port != ctx->id("DI"))
+                std::vector<CellInfo *> fanio_cells;
+                if (drv)
+                    fanio_cells.push_back(drv);
+
+                NetInfo *qnet = ci->ports.at(ctx->id("Q")).net;
+                if (qnet == nullptr)
+                    continue;
+                if (qnet && qnet->users.size() < 25)
+                    for (auto &usr : qnet->users)
+                        fanio_cells.push_back(usr.cell);
+
+                for (auto cell2 : fanio_cells) {
+                    if (is_lc(ctx, cell2) || cell2->type == ctx->id("DP16KD")) {
+                        for (auto &port : cell2->ports) {
+                            NetInfo *pn = port.second.net;
+                            if (port.second.type == PORT_OUT) {
+                                if (pn == nullptr || pn->driver.cell == nullptr)
                                     continue;
-                                if (usr.cell == ci || ffffPairs.count(usr.cell->name) ||
-                                    fflutPairs.count(usr.cell->name))
+                                CellInfo *drv2 = pn->driver.cell;
+                                if (!is_ff(ctx, drv2) || pn->driver.port != ctx->id("Q"))
                                     continue;
-                                if (!can_pack_ffs(ci, usr.cell))
+                                if (drv2 == ci || ffffPairs.count(drv2->name) ||
+                                    fflutPairs.count(drv2->name))
                                     continue;
-                                ffffPairs[ci->name] = usr.cell->name;
-                                ffffPairs[usr.cell->name] = ci->name;
+                                if (!can_pack_ffs(ci, drv2))
+                                    continue;
+                                ffffPairs[ci->name] = drv2->name;
+                                ffffPairs[drv2->name] = ci->name;
                                 goto paired;
+                            } else {
+                                if (pn == nullptr || pn->users.size() > 20)
+                                    continue;
+                                for (auto &usr : pn->users) {
+                                    if (!is_ff(ctx, usr.cell) || usr.port != ctx->id("DI"))
+                                        continue;
+                                    if (usr.cell == ci || ffffPairs.count(usr.cell->name) ||
+                                        fflutPairs.count(usr.cell->name))
+                                        continue;
+                                    if (!can_pack_ffs(ci, usr.cell))
+                                        continue;
+                                    ffffPairs[ci->name] = usr.cell->name;
+                                    ffffPairs[usr.cell->name] = ci->name;
+                                    goto paired;
+                                }
                             }
                         }
                     }
                 }
+
             }
             paired:
                 continue;
@@ -129,7 +143,7 @@ class Ecp5Packer
             CellInfo *ci = cell.second;
             if (is_ff(ctx, ci) && !ffffPairs.count(ci->name) && !fflutPairs.count(ci->name)) {
                 NetInfo *qnet = ci->ports.at(ctx->id("Q")).net;
-                if (qnet == nullptr || qnet->users.size() > 10)
+                if (qnet == nullptr || qnet->users.size() > 50)
                     continue;
                 for (auto &usr : qnet->users) {
                     if (!is_ff(ctx, usr.cell) || usr.port != ctx->id("DI"))
@@ -148,11 +162,17 @@ class Ecp5Packer
         }
         int paired_ffs = int(ffffPairs.size());
         int unpaired_ffs = 0;
+        if (ctx->debug)
+            log_info("Singleton FF (packer QoR debug): \n");
         for (auto cell : sorted(ctx->cells)) {
             CellInfo *ci = cell.second;
-            if (is_ff(ctx, ci) && !ffffPairs.count(ci->name))
+            if (is_ff(ctx, ci) && !ffffPairs.count(ci->name)) {
                 unpaired_ffs++;
+                if (ctx->debug)
+                    log_info("     %s %s\n", cell.first.c_str(ctx), ci->ports.at(ctx->id("Q")).net->name.c_str(ctx));
+            }
         }
+
         log_info("%d paired FFs, %d unpaired FFs\n", paired_ffs, unpaired_ffs);
     }
 
