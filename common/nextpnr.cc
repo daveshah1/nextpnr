@@ -475,14 +475,14 @@ void Context::check() const
             NPNR_ASSERT(user.cell->ports.at(user.port).net == ni);
         }
     }
-
+#ifdef CHECK_WIRES
     for (auto w : getWires()) {
         auto ni = getBoundWireNet(w);
         if (ni != nullptr) {
             NPNR_ASSERT(ni->wires.count(w));
         }
     }
-
+#endif
     for (auto &c : cells) {
         auto ci = c.second.get();
         NPNR_ASSERT(c.first == ci->name);
